@@ -18,8 +18,9 @@ use tui_widget_list::{ListBuilder, ListState, ListView};
 
 #[derive(PartialEq, Eq)]
 enum Focus {
-    Text,
+    NewNote,
     Feed,
+    Filter,
 }
 
 enum InputMode {
@@ -52,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut focus = Focus::Feed;
     let mut state = ListState::default();
     let mut textarea = TextArea::default();
+    let mut filter = String::new();
     let mut inputmode = InputMode::Normal;
     let mut feed_editing_mode = FeedEditingMode::New;
 
@@ -96,10 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
 
-            Focus::Text => {
-                if focus != Focus::Text {
-                    return;
-                }
+            Focus::NewNote => {
                 let area = Rect {
                     x: (f.area().width - 60) / 2,
                     y: 10,
@@ -119,8 +118,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 textarea.set_cursor_line_style(Style::default());
                 f.render_widget(&textarea, area);
             }
+
+            Focus::Filter => {
+                let area = Rect {
+                    x: (f.area().width - 60) / 2,
+                    y: 10,
+                    width: 60,
+                    height: 3,
+                };
+
+                textarea.set_block(
+                    Block::bordered().border_type(BorderType::Rounded).title(
+                        match inputmode {
+                            InputMode::Normal => "Filtering (Normal)",
+                            InputMode::Insert => "Filtering (Insert)",
+                            InputMode::View => "Filtering (View)",
+                        },
+                    ),
+                );
+                textarea.set_cursor_line_style(Style::default());
+                f.render_widget(&textarea, area);
+            }
         })?;
 
+        // input
         match focus {
             Focus::Feed => {
                 let Event::Key(key) = event::read()? else {
@@ -145,7 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     KeyCode::Char('n') => {
-                        focus = Focus::Text;
+                        focus = Focus::NewNote;
                         textarea = TextArea::default();
                         feed_editing_mode = FeedEditingMode::New;
                     }
@@ -153,7 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if state.selected.is_none() {
                             continue;
                         }
-                        focus = Focus::Text;
+                        focus = Focus::NewNote;
                         let i = state.selected.unwrap();
                         feed_editing_mode = FeedEditingMode::Edit(i);
                         textarea = TextArea::new(
@@ -164,25 +185,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .collect(),
                         );
                     }
+                    KeyCode::Char('/') => {
+                        focus = Focus::Filter;
+                        textarea = TextArea::new(vec![filter.clone()]);
+                    }
                     _ => {}
                 }
             }
 
-            Focus::Text => {
+            Focus::NewNote => {
                 let event = event::read()?;
                 match inputmode {
-                    InputMode::Normal | InputMode::View => textarea_input(
-                        event,
-                        &mut feed,
-                        &mut textarea,
-                        &mut focus,
-                        &mut inputmode,
-                        &feed_editing_mode,
-                    )?,
+                    InputMode::Normal | InputMode::View => {
+                        match event.clone().into() {
+                            Input { key: Key::Enter, .. } => {
+                                if matches!(inputmode, InputMode::Normal) {
+                                    match feed_editing_mode {
+                                        FeedEditingMode::New => {
+                                            feed.notes.push_front(Note {
+                            text: textarea.lines().join("\n"),
+                            date: chrono::offset::Local::now(),
+                        });
+                                            focus = Focus::Feed;
+                                        }
+                                        FeedEditingMode::Edit(i) => {
+                                            feed.notes[i].text =
+                                                textarea.lines().join("\n");
+                                            focus = Focus::Feed;
+                                        }
+                                    }
+                                }
+                            }
+
+                            _ => textarea_input(
+                                event,
+                                &mut textarea,
+                                &mut focus,
+                                &mut inputmode,
+                            )?,
+                        }
+                    }
                     InputMode::Insert => match event.into() {
                         Input { key: Key::Esc, .. } => {
                             inputmode = InputMode::Normal
                         }
+                        input => {
+                            textarea.input(input);
+                        }
+                    },
+                }
+            }
+
+            Focus::Filter => {
+                let event = event::read()?;
+                match inputmode {
+                    InputMode::Normal | InputMode::View => {
+                        match event.clone().into() {
+                            Input { key: Key::Enter, .. } => {
+                                filter = textarea.lines().concat();
+                                focus = Focus::Feed;
+                            }
+                            _ => textarea_input(
+                                event,
+                                &mut textarea,
+                                &mut focus,
+                                &mut inputmode,
+                            )?,
+                        }
+                    }
+                    InputMode::Insert => match event.into() {
+                        Input { key: Key::Esc, .. } => {
+                            inputmode = InputMode::Normal
+                        }
+                        Input { key: Key::Enter, .. } => {}
                         input => {
                             textarea.input(input);
                         }
@@ -203,34 +278,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn textarea_input(
     input: impl Into<Input>,
-    feed: &mut Feed,
     textarea: &mut TextArea,
     focus: &mut Focus,
     inputmode: &mut InputMode,
-    feed_editing_mode: &FeedEditingMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match input.into() {
         // normal mode
         Input { key: Key::Char('q'), .. } => {
             if matches!(inputmode, InputMode::Normal) {
                 *focus = Focus::Feed;
-            }
-        }
-        Input { key: Key::Enter, .. } => {
-            if matches!(inputmode, InputMode::Normal) {
-                match *feed_editing_mode {
-                    FeedEditingMode::New => {
-                        feed.notes.push_front(Note {
-                            text: textarea.lines().join("\n"),
-                            date: chrono::offset::Local::now(),
-                        });
-                        *focus = Focus::Feed;
-                    }
-                    FeedEditingMode::Edit(i) => {
-                        feed.notes[i].text = textarea.lines().join("\n");
-                        *focus = Focus::Feed;
-                    }
-                }
             }
         }
         Input { key: Key::Char('i'), .. } => {
