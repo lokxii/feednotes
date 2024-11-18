@@ -225,7 +225,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         } else {
-                            textarea_input(
+                            textarea_event(
                                 event,
                                 &mut textarea,
                                 &mut focus,
@@ -262,7 +262,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             textarea.input(input);
                         }
                     },
-                    _ => textarea_input(
+                    _ => textarea_event(
                         event,
                         &mut textarea,
                         &mut focus,
@@ -282,13 +282,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     return Ok(());
 }
 
-fn textarea_input(
-    input: impl Into<Input>,
+fn textarea_event(
+    event: impl Into<Input>,
     textarea: &mut TextArea,
     focus: &mut Focus,
     inputmode: &mut InputMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match input.into() {
+    match event.into() {
         // normal mode
         Input { key: Key::Backspace, .. } => {
             if matches!(inputmode, InputMode::Normal) {
