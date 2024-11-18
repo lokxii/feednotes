@@ -34,9 +34,6 @@ enum FeedEditingMode {
     Edit(usize),
 }
 
-// TODO:
-//  - Select multiple notes
-//  - More vim motions in textarea
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let home = env!("HOME");
     let mut feed: Feed =
@@ -198,7 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match inputmode {
                     InputMode::Normal | InputMode::View => {
                         match event.clone().into() {
-                            Input { key: Key::Enter, .. } => {
+                            Input { key: Key::Char('W'), .. } => {
                                 if matches!(inputmode, InputMode::Normal) {
                                     match feed_editing_mode {
                                         FeedEditingMode::New => {
@@ -284,7 +281,7 @@ fn textarea_input(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match input.into() {
         // normal mode
-        Input { key: Key::Char('q'), .. } => {
+        Input { key: Key::Backspace, .. } => {
             if matches!(inputmode, InputMode::Normal) {
                 *focus = Focus::Feed;
             }
@@ -326,13 +323,49 @@ fn textarea_input(
         }
         Input { key: Key::Char('v'), .. } => {
             if matches!(*inputmode, InputMode::Normal) {
-                textarea.move_cursor(CursorMove::Forward);
                 textarea.start_selection();
                 *inputmode = InputMode::View;
             }
         }
         Input { key: Key::Char('x'), .. } => {
             textarea.delete_next_char();
+        }
+        Input { key: Key::Char('>'), .. } => {
+            if matches!(*inputmode, InputMode::Normal)
+                && matches!(
+                    event::read().unwrap().into(),
+                    Input { key: Key::Char('>'), .. }
+                )
+            {
+                let (y, x) = textarea.cursor();
+                let mut lines = textarea.clone().into_lines();
+                let mut new_line = String::from("    ");
+                new_line += &lines[y];
+                lines[y] = new_line;
+                *textarea = TextArea::new(lines);
+                textarea.move_cursor(CursorMove::Jump(y as u16, x as u16));
+            }
+        }
+        Input { key: Key::Char('<'), .. } => {
+            if matches!(*inputmode, InputMode::Normal)
+                && matches!(
+                    event::read().unwrap().into(),
+                    Input { key: Key::Char('<'), .. }
+                )
+            {
+                let (y, x) = textarea.cursor();
+                let mut lines = textarea.clone().into_lines();
+                let mut count = 0;
+                lines[y] = lines[y]
+                    .chars()
+                    .skip_while(|c| {
+                        count += 1;
+                        *c == ' ' && count <= 4
+                    })
+                    .collect();
+                *textarea = TextArea::new(lines);
+                textarea.move_cursor(CursorMove::Jump(y as u16, x as u16));
+            }
         }
 
         // universal movement
@@ -377,14 +410,33 @@ fn textarea_input(
 
         Input { key: Key::Char('d'), .. } => match *inputmode {
             InputMode::Normal => {
-                if matches!(
-                    event::read()?.into(),
-                    Input { key: Key::Char('d'), .. }
-                ) {
-                    textarea.move_cursor(CursorMove::Head);
-                    textarea.delete_line_by_end();
-                    textarea.delete_newline();
-                    textarea.move_cursor(CursorMove::Down);
+                let e = event::read().unwrap().into();
+                match e {
+                    Input { key: Key::Char('d'), .. } => {
+                        textarea.move_cursor(CursorMove::Head);
+                        textarea.delete_line_by_end();
+                        textarea.delete_newline();
+                        textarea.move_cursor(CursorMove::Down);
+                    }
+                    Input { key: Key::Char('w'), .. } => {
+                        textarea.start_selection();
+                        textarea.move_cursor(CursorMove::WordForward);
+                        textarea.cut();
+                        textarea.cancel_selection();
+                    }
+                    Input { key: Key::Char('b'), .. } => {
+                        textarea.delete_word();
+                    }
+                    Input { key: Key::Char('i'), .. } => {
+                        if matches!(
+                            event::read().unwrap().into(),
+                            Input { key: Key::Char('w'), .. }
+                        ) {
+                            textarea.move_cursor(CursorMove::WordBack);
+                            textarea.delete_next_word();
+                        }
+                    }
+                    _ => {}
                 }
             }
             InputMode::View => {
